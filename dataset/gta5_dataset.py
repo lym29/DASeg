@@ -71,7 +71,7 @@ class GTA5DataSet(data.Dataset):
 
 
 if __name__ == '__main__':
-    dst = GTA5DataSet("./data", is_transform=True)
+    dst = GTA5DataSet("/disk2/yumeng_data/gta5/", is_transform=True)
     trainloader = data.DataLoader(dst, batch_size=4)
     for i, data in enumerate(trainloader):
         imgs, labels = data
