@@ -45,7 +45,7 @@ POWER = 0.9
 RANDOM_SEED = 1234
 RESTORE_FROM = 'http://vllab.ucmerced.edu/ytsai/CVPR18/DeepLab_resnet_pretrained_init-f81d91e8.pth'
 SAVE_NUM_IMAGES = 2
-SAVE_PRED_EVERY = 5000
+SAVE_PRED_EVERY = 1000 #5000
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
 LOG_DIR = './log'
@@ -54,6 +54,8 @@ LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1
 LAMBDA_ADV_TARGET1 = 0.0002
 LAMBDA_ADV_TARGET2 = 0.001
+LAMBDA_MATCH_TARGET1 = 0.0002
+LAMBDA_MATCH_TARGET2 = 0.001
 
 TARGET = 'cityscapes'
 SET = 'train'
@@ -102,6 +104,10 @@ def get_arguments():
                         help="lambda_adv for adversarial training.")
     parser.add_argument("--lambda-adv-target2", type=float, default=LAMBDA_ADV_TARGET2,
                         help="lambda_adv for adversarial training.")
+    parser.add_argument("--lambda-match-target1", type=float, default=LAMBDA_MATCH_TARGET1,
+                        help="lambda_match for patch match.")
+    parser.add_argument("--lambda-match-target2", type=float, default=LAMBDA_MATCH_TARGET2,
+                        help="lambda_match for patch match.")
     parser.add_argument("--momentum", type=float, default=MOMENTUM,
                         help="Momentum component of the optimiser.")
     parser.add_argument("--not-restore-last", action="store_true",
@@ -301,8 +307,6 @@ def main():
             pred1 = interp(pred1)
             pred2 = interp(pred2)
 
-            print(labels.shape)
-
             loss_seg1 = seg_loss(pred1, labels)
             loss_seg2 = seg_loss(pred2, labels)
             loss = loss_seg2 + args.lambda_seg * loss_seg1
@@ -312,7 +316,6 @@ def main():
             loss.backward(retain_graph=True)
             loss_seg_value1 += loss_seg1.item() / args.iter_size
             loss_seg_value2 += loss_seg2.item() / args.iter_size
-
             # train with target
 
             _, batch = targetloader_iter.__next__()
@@ -333,55 +336,56 @@ def main():
 
             loss = args.lambda_adv_target1 * loss_adv_target1 + args.lambda_adv_target2 * loss_adv_target2
             loss = loss / args.iter_size
-            loss.backward()
+            loss.backward(retain_graph=True)
             loss_adv_target_value1 += loss_adv_target1.item() / args.iter_size
             loss_adv_target_value2 += loss_adv_target2.item() / args.iter_size
 
             # build guidance seg feature map
-            downsample = nn.MaxPool2d(kernel_size=9, stride=8, padding=3, ceil_mode=True).to(device)
-            labels_down_set = downsample(labels.float().unsqueeze(1))
-            print(labels)
-            guidance1 = torch.zeros((args.batch_size, pred_target1_feat.shape[2], pred_target1_feat.shape[3])).long()
-            guidance2 = torch.zeros((args.batch_size, pred_target2_feat.shape[2], pred_target2_feat.shape[3])).long()
-            for i in range(args.batch_size):
-                DIM_SHIFT = (1, 2, 0)
-                BACK_SHIFT = (2, 0, 1)
-                labels_down = labels_down_set[i, :, :, :].cpu().numpy().transpose(DIM_SHIFT)
+            if i_iter % 100 == 0 and i_iter != 0:
+                downsample = nn.MaxPool2d(kernel_size=9, stride=8, padding=3, ceil_mode=True)  # .to(device)
+                labels_down_set = downsample(labels.float().unsqueeze(1))
+                guidance1 = torch.zeros(
+                    (args.batch_size, pred_target1_feat.shape[2], pred_target1_feat.shape[3])).long()
+                guidance2 = torch.zeros(
+                    (args.batch_size, pred_target2_feat.shape[2], pred_target2_feat.shape[3])).long()
+                for i in range(args.batch_size):
+                    DIM_SHIFT = (1, 2, 0)
+                    BACK_SHIFT = (2, 0, 1)
+                    labels_down = labels_down_set[i, :, :, :].cpu().numpy().transpose(DIM_SHIFT)
 
-                pred1_np = pred1_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                pred_target1_np = pred_target1_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                S2T_nnf1 = patch_match.PatchMatch(pred1_np, pred_target1_np, patch_size=5).forward()
-                T2S_nnf1 = patch_match.PatchMatch(pred_target1_np, pred1_np, patch_size=5).forward()
+                    pred1_np = pred1_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
+                    pred_target1_np = pred_target1_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
+                    S2T_nnf1 = patch_match.PatchMatch(pred1_np, pred_target1_np).forward()
+                    T2S_nnf1 = patch_match.PatchMatch(pred_target1_np, pred1_np).forward()
 
-                g1 = patch_match.bds_vote(labels_down, T2S_nnf1, S2T_nnf1).transpose(BACK_SHIFT).squeeze(0)
-                mask = ((g1 > 18) & (g1 < 30)).all()
-                g1[mask] = 18
-                g1[g1 > 18] = IGNORE_LABEL
-                guidance1[i, :, :] = torch.from_numpy(g1).long()
+                    g1 = patch_match.bds_vote(labels_down, T2S_nnf1, S2T_nnf1).transpose(BACK_SHIFT).squeeze(0)
+                    mask = ((g1 > 18) & (g1 < 30)).all()
+                    g1[mask] = 18
+                    g1[g1 > 18] = IGNORE_LABEL
+                    guidance1[i, :, :] = torch.from_numpy(g1).long()
 
-                pred2_np = pred2_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                pred_target2_np = pred_target2_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                S2T_nnf2 = patch_match.PatchMatch(pred2_np, pred_target2_np, patch_size=5).forward()
-                T2S_nnf2 = patch_match.PatchMatch(pred_target2_np, pred2_np, patch_size=5).forward()
+                    pred2_np = pred2_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
+                    pred_target2_np = pred_target2_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
+                    S2T_nnf2 = patch_match.PatchMatch(pred2_np, pred_target2_np).forward()
+                    T2S_nnf2 = patch_match.PatchMatch(pred_target2_np, pred2_np).forward()
 
-                g2 = patch_match.bds_vote(labels_down, T2S_nnf2, S2T_nnf2).transpose(BACK_SHIFT).squeeze(0)
-                mask = ((g2 > 18) & (g2 < 30)).all()
-                g2[mask] = 18
-                g2[g2 > 18] = IGNORE_LABEL
-                guidance2[i, :, :] = torch.from_numpy(g2).long()
+                    g2 = patch_match.bds_vote(labels_down, T2S_nnf2, S2T_nnf2).transpose(BACK_SHIFT).squeeze(0)
+                    mask = ((g2 > 18) & (g2 < 30)).all()
+                    g2[mask] = 18
+                    g2[g2 > 18] = IGNORE_LABEL
+                    guidance2[i, :, :] = torch.from_numpy(g2).long()
 
-            print(guidance1)
+                guidance1 = guidance1.to(device)
+                guidance2 = guidance2.to(device)
 
+                loss_matching_value1 = seg_loss(pred_target1_feat, guidance1).item() / args.iter_size
+                loss_matching_value2 = seg_loss(pred_target2_feat, guidance2).item() / args.iter_size
 
+                loss = args.lambda_match_target1 * seg_loss(pred_target1_feat, guidance1) \
+                       + args.lambda_match_target2 * seg_loss(pred_target2_feat, guidance2)
+                loss /= args.iter_size
+                loss.backward()
 
-
-
-
-            loss_matching_value1 = seg_loss(pred_target1_feat, guidance1)/args.iter_size
-            loss_matching_value2 = seg_loss(pred_target2_feat, guidance2)/args.iter_size
-
-            loss = loss_matching_value2 + args.lambda_seg * loss_matching_value1
-            loss.backward()
 
 
 
@@ -458,8 +462,11 @@ def main():
 
         print('exp = {}'.format(args.snapshot_dir))
         print(
-        'iter = {0:8d}/{1:8d}, loss_seg1 = {2:.3f} loss_seg2 = {3:.3f} loss_adv1 = {4:.3f}, loss_adv2 = {5:.3f} loss_D1 = {6:.3f} loss_D2 = {7:.3f}'.format(
-            i_iter, args.num_steps, loss_seg_value1, loss_seg_value2, loss_adv_target_value1, loss_adv_target_value2, loss_D_value1, loss_D_value2))
+        'iter = {0:8d}/{1:8d}, loss_seg1 = {2:.3f} loss_seg2 = {3:.3f} loss_adv1 = {4:.3f}, loss_adv2 = {5:.3f} loss_D1 = {6:.3f} loss_D2 = {7:.3f} '
+        'loss_match1 = {8:.3f}, loss_match2 = {9:.3f}'.format(i_iter, args.num_steps, loss_seg_value1, loss_seg_value2,
+                                                              loss_adv_target_value1, loss_adv_target_value2,
+                                                              loss_D_value1, loss_D_value2,
+                                                              loss_matching_value1, loss_matching_value2))
 
         if i_iter >= args.num_steps_stop - 1:
             print('save model ...')

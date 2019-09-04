@@ -20,9 +20,9 @@ from PIL import Image
 import torch.nn as nn
 IMG_MEAN = np.array((104.00698793,116.66876762,122.67891434), dtype=np.float32)
 
-DATA_DIRECTORY = '/disk2/yumeng_data/Cityscapes/leftImg8bit_demoVideo/'
-DATA_LIST_PATH = './dataset/cityscapes_list/my_val.txt'
-SAVE_PATH = './result/cityscapes'
+DATA_DIRECTORY = '/disk2/yumeng_data/Cityscapes/leftImg8bit_trainvaltest/'
+DATA_LIST_PATH = './dataset/cityscapes_list/val.txt'
+SAVE_PATH = '/disk2/yumeng_data/Cityscapes/result_patchmatch/cityscapes'
 
 IGNORE_LABEL = 255
 NUM_CLASSES = 19
@@ -31,6 +31,7 @@ RESTORE_FROM = 'http://vllab.ucmerced.edu/ytsai/CVPR18/GTA2Cityscapes_multi-ed35
 RESTORE_FROM_VGG = 'http://vllab.ucmerced.edu/ytsai/CVPR18/GTA2Cityscapes_vgg-ac4ac9f6.pth'
 RESTORE_FROM_ORC = 'http://vllab1.ucmerced.edu/~whung/adaptSeg/cityscapes_oracle-b7b9934.pth'
 SET = 'val'
+INPUT_SIZE = '512,256'
 
 MODEL = 'DeeplabMulti'
 
@@ -73,14 +74,17 @@ def get_arguments():
     parser.add_argument("--save", type=str, default=SAVE_PATH,
                         help="Path to save result.")
     parser.add_argument("--cpu", action='store_true', help="choose to use cpu device.")
+    parser.add_argument("--input-size", type=str, default=INPUT_SIZE,
+                        help="Comma-separated string with height and width of target images.")
     return parser.parse_args()
 
 
 def main():
     """Create the model and start the evaluation process."""
-
-    torch.cuda.set_device(2)
     args = get_arguments()
+
+    w, h = map(int, args.input_size.split(','))
+    input_size = (w, h)
 
     if not os.path.exists(args.save):
         os.makedirs(args.save)
@@ -107,10 +111,10 @@ def main():
 
     model.eval()
 
-    testloader = data.DataLoader(cityscapesDataSet(args.data_dir, args.data_list, crop_size=(1024, 512), mean=IMG_MEAN, scale=False, mirror=False, set=args.set),
+    testloader = data.DataLoader(cityscapesDataSet(args.data_dir, args.data_list, crop_size=input_size, mean=IMG_MEAN, scale=False, mirror=False, set=args.set),
                                     batch_size=1, shuffle=False, pin_memory=True)
 
-    interp = nn.Upsample(size=(1024, 2048), mode='bilinear', align_corners=True)
+    interp = nn.Upsample(size=input_size, mode='bilinear', align_corners=True)
 
     for index, batch in enumerate(testloader):
         if index % 100 == 0:

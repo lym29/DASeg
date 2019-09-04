@@ -40,9 +40,13 @@ def compute_mIoU(gt_dir, pred_dir, devkit_dir=''):
     pred_imgs = open(image_path_list, 'r').read().splitlines()
     pred_imgs = [join(pred_dir, x.split('/')[-1]) for x in pred_imgs]
 
+    input_size = (512, 256)
+
     for ind in range(len(gt_imgs)):
-        pred = np.array(Image.open(pred_imgs[ind]))
-        label = np.array(Image.open(gt_imgs[ind]))
+        pred = Image.open(pred_imgs[ind])
+        label = Image.open(gt_imgs[ind])
+        pred = np.array(pred.resize(input_size))
+        label = np.array(label.resize(input_size))
         label = label_mapping(label, mapping)
         if len(label.flatten()) != len(pred.flatten()):
             print('Skipping: len(gt) = {:d}, len(pred) = {:d}, {:s}, {:s}'.format(len(label.flatten()), len(pred.flatten()), gt_imgs[ind], pred_imgs[ind]))
