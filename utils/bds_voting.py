@@ -63,6 +63,8 @@ class PatchMatch(nn.Module):
         return point_set
 
     def find_nnf(self):
+        _, _, th, tw = self.target_map.size()
+        _, _, sh, sw = self.source_map.size()
         flann = pyflann.FLANN()
         pts_tensor = self.build_pts_set_for_flann(self.target_map)
         q_pts_tensor = self.build_pts_set_for_flann(self.source_map)
@@ -70,14 +72,10 @@ class PatchMatch(nn.Module):
             pts = pts_tensor[n, :, :].numpy().transpose(1, 0)
             q_pts = q_pts_tensor[n, :, :].numpy().transpose(1, 0)
             result_id, dists = flann.nn(pts, q_pts, 1, algorithm='kdtree', trees=4)
-            count = 0
-            for i in range(self.source_map.shape[0]):
-                for j in range(self.source_map.shape[1]):
-                    id_in_targ = result_id[count]
-                    idy, idx = id_in_targ // self.target_map.shape[1], id_in_targ % self.target_map.shape[1]
-                    self.nnf[n, i, j, :] = np.array([idy, idx])
-                    self.nnd[n, i, j, :] = dists[count]
-                    count += 1
+            idy, idx = result_id // tw, result_id % tw
+            self.nnf[n, 0, :, :] = torch.from_numpy(idy.reshape(th, tw))
+            self.nnf[n, 1, :, :] = torch.from_numpy(idx.reshape(th, tw))
+            self.nnd[n, 0, :, :] = torch.from_numpy(dists.reshape(th, tw))
 
     def forward(self):
         self.find_nnf()
