@@ -2,6 +2,7 @@ import argparse
 import torch
 import torch.nn as nn
 from torch.utils import data, model_zoo
+import torchvision
 import numpy as np
 import pickle
 from torch.autograd import Variable
@@ -21,7 +22,7 @@ from utils.loss import CrossEntropy2d
 from dataset.gta5_dataset import GTA5DataSet
 from dataset.cityscapes_dataset import cityscapesDataSet
 
-from utils import patch_match
+from utils import bds_voting
 
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
@@ -166,6 +167,11 @@ def adjust_learning_rate_D(optimizer, i_iter):
         optimizer.param_groups[1]['lr'] = lr * 10
 
 
+def get_feature(vgg19, img_tensor, feature_id):
+    feature_tensor = vgg19.features[:feature_id](img_tensor)
+    return feature_tensor
+
+
 def main():
     """Create the model and start the training."""
 
@@ -234,6 +240,10 @@ def main():
 
     targetloader_iter = enumerate(targetloader)
 
+    # Load VGG
+    vgg19 = torchvision.models.vgg19(pretrained=True)
+    vgg19.to(device)
+
     # implement model.optim_parameters(args) to handle different models' lr setting
 
     optimizer = optim.SGD(model.optim_parameters(args),
@@ -301,9 +311,11 @@ def main():
             images, labels, _, _ = batch
             images = images.to(device)
             labels = labels.long().to(device)
+            # VGG feature
+            source_feature = get_feature(vgg19, images, 29)
+            source_feature /= torch.norm(source_feature, dim=1, keepdim=True)
 
             pred1, pred2 = model(images)
-            pred1_feat, pred2_feat = pred1, pred2
             pred1 = interp(pred1)
             pred2 = interp(pred2)
 
@@ -316,14 +328,16 @@ def main():
             loss.backward(retain_graph=True)
             loss_seg_value1 += loss_seg1.item() / args.iter_size
             loss_seg_value2 += loss_seg2.item() / args.iter_size
-            # train with target
 
+            # train with target
             _, batch = targetloader_iter.__next__()
             images, _, _ = batch
             images = images.to(device)
+            # VGG feature
+            target_feature = get_feature(vgg19, images, 29)
+            target_feature /= torch.norm(target_feature, dim=1, keepdim=True)
 
             pred_target1, pred_target2 = model(images)
-            pred_target1_feat, pred_target2_feat = pred_target1, pred_target2
             pred_target1 = interp_target(pred_target1)
             pred_target2 = interp_target(pred_target2)
 
@@ -341,50 +355,22 @@ def main():
             loss_adv_target_value2 += loss_adv_target2.item() / args.iter_size
 
             # build guidance seg feature map
-            if i_iter % 100 == 0 and i_iter != 0:
-                downsample = nn.MaxPool2d(kernel_size=9, stride=8, padding=3, ceil_mode=True)  # .to(device)
-                labels_down_set = downsample(labels.float().unsqueeze(1))
-                guidance1 = torch.zeros(
-                    (args.batch_size, pred_target1_feat.shape[2], pred_target1_feat.shape[3])).long()
-                guidance2 = torch.zeros(
-                    (args.batch_size, pred_target2_feat.shape[2], pred_target2_feat.shape[3])).long()
-                for i in range(args.batch_size):
-                    DIM_SHIFT = (1, 2, 0)
-                    BACK_SHIFT = (2, 0, 1)
-                    labels_down = labels_down_set[i, :, :, :].cpu().numpy().transpose(DIM_SHIFT)
+            S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
+            T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
+            g = bds_voting.bds_vote(labels, S2T_nnf, T2S_nnf)
 
-                    pred1_np = pred1_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                    pred_target1_np = pred_target1_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                    S2T_nnf1 = patch_match.PatchMatch(pred1_np, pred_target1_np).forward()
-                    T2S_nnf1 = patch_match.PatchMatch(pred_target1_np, pred1_np).forward()
+            g = g.long().to(device)
+            _, _, gh, gw = g.size()
+            pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
+            pred_targ_match2 = F.upsample(pred_target2, size=(gh, gw), mode='bilinear')
 
-                    g1 = patch_match.bds_vote(labels_down, T2S_nnf1, S2T_nnf1).transpose(BACK_SHIFT).squeeze(0)
-                    mask = ((g1 > 18) & (g1 < 30)).all()
-                    g1[mask] = 18
-                    g1[g1 > 18] = IGNORE_LABEL
-                    guidance1[i, :, :] = torch.from_numpy(g1).long()
+            loss_matching_value1 = seg_loss(pred_targ_match1, g).item() / args.iter_size
+            loss_matching_value2 = seg_loss(pred_targ_match2, g).item() / args.iter_size
 
-                    pred2_np = pred2_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                    pred_target2_np = pred_target2_feat[i, :, :, :].detach().cpu().numpy().transpose(DIM_SHIFT)
-                    S2T_nnf2 = patch_match.PatchMatch(pred2_np, pred_target2_np).forward()
-                    T2S_nnf2 = patch_match.PatchMatch(pred_target2_np, pred2_np).forward()
-
-                    g2 = patch_match.bds_vote(labels_down, T2S_nnf2, S2T_nnf2).transpose(BACK_SHIFT).squeeze(0)
-                    mask = ((g2 > 18) & (g2 < 30)).all()
-                    g2[mask] = 18
-                    g2[g2 > 18] = IGNORE_LABEL
-                    guidance2[i, :, :] = torch.from_numpy(g2).long()
-
-                guidance1 = guidance1.to(device)
-                guidance2 = guidance2.to(device)
-
-                loss_matching_value1 = seg_loss(pred_target1_feat, guidance1).item() / args.iter_size
-                loss_matching_value2 = seg_loss(pred_target2_feat, guidance2).item() / args.iter_size
-
-                loss = args.lambda_match_target1 * seg_loss(pred_target1_feat, guidance1) \
-                       + args.lambda_match_target2 * seg_loss(pred_target2_feat, guidance2)
-                loss /= args.iter_size
-                loss.backward()
+            loss = args.lambda_match_target1 * seg_loss(pred_targ_match1, g) \
+                       + args.lambda_match_target2 * seg_loss(pred_targ_match2, g)
+            loss /= args.iter_size
+            loss.backward()
 
 
 
