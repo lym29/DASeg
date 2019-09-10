@@ -2,8 +2,19 @@ import numpy as np
 import torch
 import pyflann
 import torch.nn as nn
-import torch.functional as F
+import torch.nn.functional as F
 
+
+def build_extended_map(p_size, x):
+        n, c, h, w = x.size()
+        step = p_size // 2
+        y = torch.zeros((n, c, h + 2 * step, w + 2 * step))
+        y[:, :, step:step + h, step:step + w] = x
+        y[:, :, step:step + h, :step] = x[:, :, :, 0:1].expand((n, c, h, step))
+        y[:, :, step:step + h, step + w:step + 2 * w] = x[:, :, :, -1:w + 2 * step].expand((n, c, h, step))
+        y[:, :, :step, :] = y[:, :, step:step + 1, :].expand((n, c, step, w + 2 * step))
+        y[:, :, h + step:, :] = y[:, :, h + step - 1:h + step, :].expand((n, c, step, w + 2 * step))
+        return y
 
 def bds_vote(ref, nnf_st, nnf_ts, p_size=3, ignore_label=255):
     """
@@ -13,16 +24,16 @@ def bds_vote(ref, nnf_st, nnf_ts, p_size=3, ignore_label=255):
     batch_size, c, _, _ = ref.size()
     _, _, sh, sw = nnf_st.size()
     _, _, th, tw = nnf_ts.size()
-    step = patch_size // 2
+    step = p_size // 2
 
-    ref = F.upsample(ref, size=(sh, sw), mode='bilinear')
+    ref = F.upsample(ref.float(), size=(sh, sw), mode='bilinear',align_corners=True)
 
     num_s = sh * sw
     num_t = th * tw
 
-    ex_ref = self.build_extended_map(ref)
+    ex_ref = build_extended_map(p_size, ref)
     ex_guide = torch.zeros(batch_size, c, th + 2 * step, tw + 2 * step)
-    ex_weight = self.build_extended_map(torch.zeros(batch_size, c, th + 2 * step, tw + 2 * step))
+    ex_weight = torch.zeros(batch_size, c, th + 2 * step, tw + 2 * step)
 
     for n in range(batch_size):
         # S to T Complete
@@ -63,21 +74,10 @@ class PatchMatch(nn.Module):
         self.nnf = torch.zeros((n, 2, h, w), dtype=int)  # The NNF
         self.nnd = torch.zeros(n, 1, h, w)  # The NNF distance map
 
-    def build_extended_map(self, x):
-        n, c, h, w = x.size()
-        step = self.patch_size // 2
-        y = torch.zeros((n, c, h + 2 * step, w + 2 * step))
-        y[:, :, step:step + h, step:step + w] = x
-        y[:, :, step:step + h, :step] = x[:, :, :, 0:1].expand((n, c, h, step))
-        y[:, :, step:step + h, step + w:step + 2 * w] = x[:, :, :, -1:w + 2 * step].expand((n, c, h, step))
-        y[:, :, :step, :] = y[:, :, step:step + 1, :].expand((n, c, step, w + 2 * step))
-        y[:, :, h + step:, :] = y[:, :, h + step - 1:h + step, :].expand((n, c, step, w + 2 * step))
-        return y
-
     def build_pts_set_for_flann(self, x):
         patch_size = self.patch_size
         n, c, h, w = x.size()
-        y = self.build_extended_map(x)
+        y = build_extended_map(patch_size, x)
         # build feat tensor for flann
         ex_feat = torch.zeros(n, c, patch_size * patch_size, h, w)  # extended feature map
         for i in range(patch_size):
@@ -97,13 +97,13 @@ class PatchMatch(nn.Module):
         pts_tensor = self.build_pts_set_for_flann(self.target_map)
         q_pts_tensor = self.build_pts_set_for_flann(self.source_map)
         for n in range(self.batch_size):
-            pts = pts_tensor[n, :, :].numpy().transpose(1, 0)
-            q_pts = q_pts_tensor[n, :, :].numpy().transpose(1, 0)
+            pts = pts_tensor[n, :, :].detach().numpy().transpose(1, 0)
+            q_pts = q_pts_tensor[n, :, :].detach().numpy().transpose(1, 0)
             result_id, dists = flann.nn(pts, q_pts, 1, algorithm='kdtree', trees=4)
             idy, idx = result_id // tw, result_id % tw
-            self.nnf[n, 0, :, :] = torch.from_numpy(idy.reshape(th, tw))
-            self.nnf[n, 1, :, :] = torch.from_numpy(idx.reshape(th, tw))
-            self.nnd[n, 0, :, :] = torch.from_numpy(dists.reshape(th, tw))
+            self.nnf[n, 0, :, :] = torch.from_numpy(idy.reshape(sh, sw))
+            self.nnf[n, 1, :, :] = torch.from_numpy(idx.reshape(sh, sw))
+            self.nnd[n, 0, :, :] = torch.from_numpy(dists.reshape(sh, sw))
 
     def forward(self):
         self.find_nnf()
