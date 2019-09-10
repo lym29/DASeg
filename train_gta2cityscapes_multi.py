@@ -30,11 +30,11 @@ MODEL = 'DeepLab'
 BATCH_SIZE = 1
 ITER_SIZE = 1
 NUM_WORKERS = 4
-DATA_DIRECTORY = '/disk2/yumeng_data/gta5/'
+DATA_DIRECTORY = '../dataset/gta5/'
 DATA_LIST_PATH = './dataset/gta5_list/train.txt'
 IGNORE_LABEL = 255
 INPUT_SIZE = '1280,720'
-DATA_DIRECTORY_TARGET = '/disk2/yumeng_data/Cityscapes/leftImg8bit_trainvaltest/'
+DATA_DIRECTORY_TARGET = '../dataset/Cityscapes/leftImg8bit_trainvaltest/'
 DATA_LIST_PATH_TARGET = './dataset/cityscapes_list/train.txt'
 INPUT_SIZE_TARGET = '1024,512'
 LEARNING_RATE = 2.5e-4
@@ -46,7 +46,7 @@ POWER = 0.9
 RANDOM_SEED = 1234
 RESTORE_FROM = 'http://vllab.ucmerced.edu/ytsai/CVPR18/DeepLab_resnet_pretrained_init-f81d91e8.pth'
 SAVE_NUM_IMAGES = 2
-SAVE_PRED_EVERY = 1000 #5000
+SAVE_PRED_EVERY = 100 #5000
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
 LOG_DIR = './log'
@@ -192,16 +192,17 @@ def main():
             saved_state_dict = model_zoo.load_url(args.restore_from)
         else:
             saved_state_dict = torch.load(args.restore_from)
+        model.load_state_dict(saved_state_dict)
 
-        new_params = model.state_dict().copy()
-        for i in saved_state_dict:
-            # Scale.layer5.conv2d_list.3.weight
-            i_parts = i.split('.')
-            # print i_parts
-            if not args.num_classes == 19 or not i_parts[1] == 'layer5':
-                new_params['.'.join(i_parts[1:])] = saved_state_dict[i]
-                # print i_parts
-        model.load_state_dict(new_params)
+#         new_params = model.state_dict().copy()
+#         for i in saved_state_dict:
+#             # Scale.layer5.conv2d_list.3.weight
+#             i_parts = i.split('.')
+#             # print i_parts
+#             if not args.num_classes == 19 or not i_parts[1] == 'layer5':
+#                 new_params['.'.join(i_parts[1:])] = saved_state_dict[i]
+#                 # print i_parts
+#         model.load_state_dict(new_params)
 
     model.train()
     model.to(device)
@@ -211,6 +212,10 @@ def main():
     # init D
     model_D1 = FCDiscriminator(num_classes=args.num_classes).to(device)
     model_D2 = FCDiscriminator(num_classes=args.num_classes).to(device)
+    
+    model_D1.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi/GTA5_2000_D1.pth'))
+    model_D2.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi/GTA5_2000_D2.pth'))
+    
 
     model_D1.train()
     model_D1.to(device)
@@ -273,7 +278,7 @@ def main():
 
         writer = SummaryWriter(args.log_dir)
 
-    for i_iter in range(args.num_steps):
+    for i_iter in range(2001, args.num_steps):
 
         loss_seg_value1 = 0
         loss_adv_target_value1 = 0
@@ -357,10 +362,13 @@ def main():
             # build guidance seg feature map
             S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
             T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
-            g = bds_voting.bds_vote(labels, S2T_nnf, T2S_nnf)
-
+            
+            g = bds_voting.bds_vote(labels.unsqueeze(1), S2T_nnf, T2S_nnf)
+            g = g.squeeze(1)
             g = g.long().to(device)
-            _, _, gh, gw = g.size()
+            g[g>=args.num_classes] = args.ignore_label
+
+            _, gh, gw = g.size()
             pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
             pred_targ_match2 = F.upsample(pred_target2, size=(gh, gw), mode='bilinear')
 
