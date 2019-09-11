@@ -114,7 +114,7 @@ def main():
     testloader = data.DataLoader(cityscapesDataSet(args.data_dir, args.data_list, crop_size=input_size, mean=IMG_MEAN, scale=False, mirror=False, set=args.set),
                                     batch_size=1, shuffle=False, pin_memory=True)
 
-    interp = nn.Upsample(size=input_size, mode='bilinear', align_corners=True)
+    interp = nn.Upsample(size=(input_size[1], input_size[0]), mode='bilinear', align_corners=True)
 
     for index, batch in enumerate(testloader):
         if index % 100 == 0:
