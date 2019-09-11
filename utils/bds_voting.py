@@ -104,7 +104,7 @@ class PatchMatch(nn.Module):
         for n in range(self.batch_size):
             pts = pts_tensor[n, :, :].detach().numpy().transpose(1, 0)
             q_pts = q_pts_tensor[n, :, :].detach().numpy().transpose(1, 0)
-            result_id, dists = flann.nn(pts, q_pts, 1, algorithm='kdtree', trees=4)
+            result_id, dists = flann.nn(pts, q_pts, 1, algorithm='kdtree', trees=8)
             idy, idx = result_id // tw, result_id % tw
             self.nnf[n, 0, :, :] = torch.from_numpy(idy.reshape(sh, sw))
             self.nnf[n, 1, :, :] = torch.from_numpy(idx.reshape(sh, sw))

@@ -318,7 +318,7 @@ def main():
             images = images.to(device)
             labels = labels.long().to(device)
             # VGG feature
-            source_feature = get_feature(vgg19, images, 29)
+            source_feature = get_feature(vgg19, images, 29).detach()
             source_feature /= torch.norm(source_feature, dim=1, keepdim=True)
 
             pred1, pred2 = model(images)
@@ -340,7 +340,7 @@ def main():
             images, _, _ = batch
             images = images.to(device)
             # VGG feature
-            target_feature = get_feature(vgg19, images, 29)
+            target_feature = get_feature(vgg19, images, 29).detach()
             target_feature /= torch.norm(target_feature, dim=1, keepdim=True)
 
             pred_target1, pred_target2 = model(images)
@@ -366,11 +366,11 @@ def main():
 
             class_p = bds_voting.build_prob_map(labels, args.num_classes)
             g = bds_voting.bds_vote(class_p, S2T_nnf, T2S_nnf)
-            g_norm = torch.norm(g, dim=1, keepdim=True)
-            g[g_norm > 1e-6] = g[g_norm > 1e-6] / g_norm[g_norm > 1e-6]
-            g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf)
+            g_norm = torch.norm(g, dim=1, keepdim=True).repeat(1, args.num_classes, 1, 1)
+            g[g_norm > 1e-6] /= g_norm[g_norm > 1e-6]
+            g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf).to(device).detach()
 
-            g = g.to(device)
+            g = g.to(device).detach()
             _, _, gh, gw = g.size()
 
             pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
