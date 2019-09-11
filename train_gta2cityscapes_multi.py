@@ -367,7 +367,7 @@ def main():
             class_p = bds_voting.build_prob_map(labels, args.num_classes)
             g = bds_voting.bds_vote(class_p, S2T_nnf, T2S_nnf)
             g_norm = torch.norm(g, dim=1, keepdim=True)
-            g[g_norm > 1e-6] /= g_norm[g_norm > 1e-6]
+            g[g_norm > 1e-6] = g[g_norm > 1e-6] / g_norm[g_norm > 1e-6]
             g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf)
 
             g = g.to(device)
