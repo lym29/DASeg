@@ -25,6 +25,8 @@ from dataset.cityscapes_dataset import cityscapesDataSet
 from utils import bds_voting
 from utils import matching_loss
 
+import time
+
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
 MODEL = 'DeepLab'
@@ -361,27 +363,40 @@ def main():
             loss_adv_target_value2 += loss_adv_target2.item() / args.iter_size
 
             # build guidance seg feature map
+            start_time = time.time()
             S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
+            print("---patch match %s seconds ---" % (time.time() - start_time))
+            start_time = time.time()
             T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
+            print("---patch match %s seconds ---" % (time.time() - start_time))
 
-            class_p = bds_voting.build_prob_map(labels, args.num_classes)
+            start_time = time.time()
+            class_p = bds_voting.build_prob_map(labels.unsqueeze(0), args.num_classes)
+            print("---build prob map %s seconds ---" % (time.time() - start_time))
+            # record time
+            start_time = time.time()
             g = bds_voting.bds_vote(class_p, S2T_nnf, T2S_nnf)
-            g_norm = torch.norm(g, dim=1, keepdim=True).repeat(1, args.num_classes, 1, 1)
-            g[g_norm > 1e-6] /= g_norm[g_norm > 1e-6]
+            print("---first vote %s seconds ---" % (time.time() - start_time))
+            start_time = time.time()
             g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf).to(device).detach()
+            print("---second vote %s seconds ---" % (time.time() - start_time))
 
             g = g.to(device).detach()
+            g_feature = g_feature.to(device).detach()
+            g_feature /= torch.norm(g_feature, dim=1, keepdim=True)
             _, _, gh, gw = g.size()
 
             pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
             pred_targ_match2 = F.upsample(pred_target2, size=(gh, gw), mode='bilinear')
+
+            softmax = torch.nn.Softmax().to(device)
             mloss = matching_loss.compute_matching_loss
 
-            loss_matching_value1 = mloss(pred_targ_match1, g, target_feature, g_feature).item() / args.iter_size
-            loss_matching_value2 = mloss(pred_targ_match2, g, target_feature, g_feature).item() / args.iter_size
+            loss_matching_value1 = mloss(pred_targ_match1, g, target_feature, g_feature, softmax).item() / args.iter_size
+            loss_matching_value2 = mloss(pred_targ_match2, g, target_feature, g_feature, softmax).item() / args.iter_size
 
-            loss = args.lambda_match_target1 * mloss(pred_targ_match1, g, target_feature, g_feature) \
-                       + args.lambda_match_target2 * mloss(pred_targ_match2, g, target_feature, g_feature)
+            loss = args.lambda_match_target1 * mloss(pred_targ_match1, g, target_feature, g_feature, softmax) \
+                       + args.lambda_match_target2 * mloss(pred_targ_match2, g, target_feature, g_feature, softmax)
             loss /= args.iter_size
             loss.backward()
 

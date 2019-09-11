@@ -27,7 +27,7 @@ def bds_vote(ref, nnf_st, nnf_ts, p_size=3, ignore_label=255):
     _, _, th, tw = nnf_ts.size()
     step = p_size // 2
 
-    ref = F.upsample(ref.float(), size=(sh, sw), mode='bilinear',align_corners=True)
+    ref = F.upsample(ref.float(), size=(sh, sw), mode='nearest')
 
     num_s = sh * sw
     num_t = th * tw
@@ -58,10 +58,11 @@ def bds_vote(ref, nnf_st, nnf_ts, p_size=3, ignore_label=255):
 
 
 def build_prob_map(labels, num_classes):
-    n, h, w = labels.size()
+    n, _, h, w = labels.size()
+    l = labels.squeeze(1)
     p = torch.zeros(n, num_classes, h, w)
     for c in range(num_classes):
-        p[:, c, :, :][labels == c] = 1
+        p[:, c, :, :][l == c] = 1
     return p
 
 
