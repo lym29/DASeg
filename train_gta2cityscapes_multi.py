@@ -23,6 +23,7 @@ from dataset.gta5_dataset import GTA5DataSet
 from dataset.cityscapes_dataset import cityscapesDataSet
 
 from utils import bds_voting
+from utils import matching_loss
 
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
@@ -357,18 +358,23 @@ def main():
             # build guidance seg feature map
             S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
             T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
-            g = bds_voting.bds_vote(labels, S2T_nnf, T2S_nnf)
+            class_p = bds_voting.build_prob_map(labels, args.num_classes)
+            g = bds_voting.bds_vote(class_p, S2T_nnf, T2S_nnf)
+            g_norm = torch.norm(g, dim=1, keepdim=True)
+            g[g_norm > 1e-6] /= g_norm[g_norm > 1e-6]
+            g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf)
 
-            g = g.long().to(device)
+            g = g.to(device)
             _, _, gh, gw = g.size()
             pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
             pred_targ_match2 = F.upsample(pred_target2, size=(gh, gw), mode='bilinear')
+            mloss = matching_loss.compute_matching_loss
 
-            loss_matching_value1 = seg_loss(pred_targ_match1, g).item() / args.iter_size
-            loss_matching_value2 = seg_loss(pred_targ_match2, g).item() / args.iter_size
+            loss_matching_value1 = mloss(pred_targ_match1, g, target_feature, g_feature).item() / args.iter_size
+            loss_matching_value2 = mloss(pred_targ_match2, g, target_feature, g_feature).item() / args.iter_size
 
-            loss = args.lambda_match_target1 * seg_loss(pred_targ_match1, g) \
-                       + args.lambda_match_target2 * seg_loss(pred_targ_match2, g)
+            loss = args.lambda_match_target1 * mloss(pred_targ_match1, g, target_feature, g_feature) \
+                       + args.lambda_match_target2 * mloss(pred_targ_match2, g, target_feature, g_feature)
             loss /= args.iter_size
             loss.backward()
 
