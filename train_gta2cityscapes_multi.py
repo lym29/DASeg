@@ -49,7 +49,7 @@ POWER = 0.9
 RANDOM_SEED = 1234
 RESTORE_FROM = 'http://vllab.ucmerced.edu/ytsai/CVPR18/DeepLab_resnet_pretrained_init-f81d91e8.pth'
 SAVE_NUM_IMAGES = 2
-SAVE_PRED_EVERY = 100 #5000
+SAVE_PRED_EVERY = 500 #5000
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
 LOG_DIR = './log'
@@ -58,6 +58,7 @@ LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1
 LAMBDA_ADV_TARGET1 = 0.0002
 LAMBDA_ADV_TARGET2 = 0.001
+LAMBDA_ADV_LOCAL1 = 0.0002
 LAMBDA_MATCH_TARGET1 = 0.0002
 LAMBDA_MATCH_TARGET2 = 0.001
 
@@ -112,6 +113,8 @@ def get_arguments():
                         help="lambda_match for patch match.")
     parser.add_argument("--lambda-match-target2", type=float, default=LAMBDA_MATCH_TARGET2,
                         help="lambda_match for patch match.")
+    parser.add_argument("--lambda-adv-local1", type=float, default=LAMBDA_ADV_LOCAL1,
+                        help="lambda_adv for local target.")
     parser.add_argument("--momentum", type=float, default=MOMENTUM,
                         help="Momentum component of the optimiser.")
     parser.add_argument("--not-restore-last", action="store_true",
@@ -216,8 +219,8 @@ def main():
     model_D1 = FCDiscriminator(num_classes=args.num_classes).to(device)
     model_D2 = FCDiscriminator(num_classes=args.num_classes).to(device)
     
-    #model_D1.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi/GTA5_2000_D1.pth'))
-    #model_D2.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi/GTA5_2000_D2.pth'))
+    #model_D1.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi_005_0025/GTA5_11700_D1.pth'))
+    #model_D2.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi_005_0025/GTA5_11700_D2.pth'))
     
 
     model_D1.train()
@@ -281,12 +284,15 @@ def main():
 
         writer = SummaryWriter(args.log_dir)
 
-    for i_iter in range(args.num_steps):
+    for i_iter in range(0, args.num_steps):
 
         loss_seg_value1 = 0
         loss_adv_target_value1 = 0
+        loss_adv_local_value1 = 0
         loss_matching_value1 = 0
         loss_D_value1 = 0
+        loss_D_value_s_1 = 0
+        loss_D_value_t_1 = 0
 
         loss_seg_value2 = 0
         loss_adv_target_value2 = 0
@@ -363,45 +369,56 @@ def main():
             loss_adv_target_value2 += loss_adv_target2.item() / args.iter_size
 
             # build guidance seg feature map
-            start_time = time.time()
+#             S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
+#             T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
+            
+#             class_p = bds_voting.build_prob_map(labels.unsqueeze(0), args.num_classes)
+#             g = bds_voting.bds_vote(class_p, S2T_nnf, T2S_nnf)
+#             g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf).to(device).detach()
+            
+#             g = g.to(device).detach()
+#             g_feature = g_feature.to(device).detach()
+#             g_feature /= torch.norm(g_feature, dim=1, keepdim=True)
+#             _, _, gh, gw = g.size()
+
+#             pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
+#             pred_targ_match2 = F.upsample(pred_target2, size=(gh, gw), mode='bilinear')
+
+#             softmax = torch.nn.Softmax().to(device)
+#             mloss = matching_loss.compute_matching_loss
+
+#             loss_matching_value1 = mloss(pred_targ_match1, g, target_feature, g_feature, softmax).item() / args.iter_size
+#             loss_matching_value2 = mloss(pred_targ_match2, g, target_feature, g_feature, softmax).item() / args.iter_size
+
+#             loss = args.lambda_match_target1 * mloss(pred_targ_match1, g, target_feature, g_feature, softmax) \
+#                        + args.lambda_match_target2 * mloss(pred_targ_match2, g, target_feature, g_feature, softmax)
+#             loss /= args.iter_size
+#             loss.backward()
+
+
             S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
-            print("---patch match %s seconds ---" % (time.time() - start_time))
-            start_time = time.time()
             T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
-            print("---patch match %s seconds ---" % (time.time() - start_time))
 
-            start_time = time.time()
-            class_p = bds_voting.build_prob_map(labels.unsqueeze(0), args.num_classes)
-            print("---build prob map %s seconds ---" % (time.time() - start_time))
-            # record time
-            start_time = time.time()
-            g = bds_voting.bds_vote(class_p, S2T_nnf, T2S_nnf)
-            print("---first vote %s seconds ---" % (time.time() - start_time))
-            start_time = time.time()
-            g_feature = bds_voting.bds_vote(source_feature, S2T_nnf, T2S_nnf).to(device).detach()
-            print("---second vote %s seconds ---" % (time.time() - start_time))
-
-            g = g.to(device).detach()
-            g_feature = g_feature.to(device).detach()
-            g_feature /= torch.norm(g_feature, dim=1, keepdim=True)
-            _, _, gh, gw = g.size()
-
-            pred_targ_match1 = F.upsample(pred_target1, size=(gh, gw), mode='bilinear')
-            pred_targ_match2 = F.upsample(pred_target2, size=(gh, gw), mode='bilinear')
-
-            softmax = torch.nn.Softmax().to(device)
-            mloss = matching_loss.compute_matching_loss
-
-            loss_matching_value1 = mloss(pred_targ_match1, g, target_feature, g_feature, softmax).item() / args.iter_size
-            loss_matching_value2 = mloss(pred_targ_match2, g, target_feature, g_feature, softmax).item() / args.iter_size
-
-            loss = args.lambda_match_target1 * mloss(pred_targ_match1, g, target_feature, g_feature, softmax) \
-                       + args.lambda_match_target2 * mloss(pred_targ_match2, g, target_feature, g_feature, softmax)
-            loss /= args.iter_size
-            loss.backward()
-
-
-
+            prob_p = bds_voting.build_prob_map(labels.unsqueeze(0), args.num_classes)
+            
+            _, _, h, w = pred1.size()
+            _, _, fh, fw = source_feature.size()
+            scale_s = torch.Tensor([h, w]) // torch.Tensor([fh, fw])
+            _, _, h, w = pred_target1.size()
+            _, _, fh, fw = target_feature.size()
+            scale_t = torch.Tensor([h, w]) // torch.Tensor([fh, fw])
+            nbb_list_s, nbb_list_t = matching_loss.find_NBB(S2T_nnf, T2S_nnf, labels.unsqueeze(0), prob_p)
+            cropsize_list_s = matching_loss.get_crop_size(pred1, nbb_list_s, scale_s, device)
+            cropsize_list_t = matching_loss.get_crop_size(pred_target1, nbb_list_t, scale_t, device)
+            for n in range(len(nbb_list_t)):
+                for k in range(len(nbb_list_t[n])):
+                    ti, tj = nbb_list_t[n][k]
+                    cropped_targ1 = matching_loss.crop_img(pred_target1, scale_t, torch.Tensor([ti, tj]), cropsize_list_t[n][k])
+                    D_out_t = model_D1(F.softmax(cropped_targ1))
+                    loss = bce_loss(D_out_t, torch.FloatTensor(D_out_t.data.size()).fill_(source_label).to(device))
+                    loss_adv_local_value1 += loss.item() / args.iter_size
+                    loss = args.lambda_adv_local1 * loss / args.iter_size
+                    loss.backward(retain_graph=True)
 
 
 
@@ -413,6 +430,29 @@ def main():
 
             for param in model_D2.parameters():
                 param.requires_grad = True
+                
+            
+            for n in range(len(nbb_list_s)):
+                for k in range(len(nbb_list_s[n])):
+                    si, sj = nbb_list_s[n][k]
+                    cropped_source1 = matching_loss.crop_img(pred1, scale_s, torch.Tensor([si, sj]),
+                                                             cropsize_list_s[n][k])
+                    D_out_s = model_D1(F.softmax(cropped_source1.detach()))
+                    loss_Ds = bce_loss(D_out_s, torch.FloatTensor(D_out_s.data.size()).fill_(source_label).to(device))
+                    loss_Ds /= args.iter_size / 2
+                    loss_Ds.backward()
+                    loss_D_value_s_1 += loss_Ds.item()
+
+            for n in range(len(nbb_list_t)):
+                for k in range(len(nbb_list_t[n])):
+                    ti, tj = nbb_list_t[n][k]
+                    cropped_targ1 = matching_loss.crop_img(pred_target1, scale_t, torch.Tensor([ti, tj]),
+                                                           cropsize_list_t[n][k])
+                    D_out_t = model_D1(F.softmax(cropped_targ1.detach()))
+                    loss_Dt = bce_loss(D_out_t, torch.FloatTensor(D_out_t.data.size()).fill_(target_label).to(device))
+                    loss_Dt /= args.iter_size / 2
+                    loss_Dt.backward()
+                    loss_D_value_t_1 += loss_Dt.item()
 
             # train with source
             pred1 = pred1.detach()
@@ -467,7 +507,10 @@ def main():
                 'loss_D1': loss_D_value1,
                 'loss_D2': loss_D_value2,
                 'loss_matching1': loss_matching_value1,
-                'loss_matching2': loss_matching_value2
+                'loss_matching2': loss_matching_value2,
+                'loss_local_adv_1': loss_adv_local_value1,
+                'loss_Ds_1': loss_D_value_s_1,
+                'loss_Dt_1': loss_D_value_t_1
             }
 
             if i_iter % 10 == 0:
@@ -476,11 +519,10 @@ def main():
 
         print('exp = {}'.format(args.snapshot_dir))
         print(
-        'iter = {0:8d}/{1:8d}, loss_seg1 = {2:.3f} loss_seg2 = {3:.3f} loss_adv1 = {4:.3f}, loss_adv2 = {5:.3f} loss_D1 = {6:.3f} loss_D2 = {7:.3f} '
-        'loss_match1 = {8:.3f}, loss_match2 = {9:.3f}'.format(i_iter, args.num_steps, loss_seg_value1, loss_seg_value2,
+        'iter = {0:8d}/{1:8d}, loss_seg1 = {2:.3f} loss_seg2 = {3:.3f} loss_adv1 = {4:.3f}, loss_adv2 = {5:.3f} loss_D1 = {6:.3f} loss_D2 = {7:.3f} loss_local_adv_1 = {8:.3f} loss_Ds_1 = {9:.3f} loss_Dt_1 = {9:.3f}'.format(i_iter, args.num_steps, loss_seg_value1, loss_seg_value2,
                                                               loss_adv_target_value1, loss_adv_target_value2,
                                                               loss_D_value1, loss_D_value2,
-                                                              loss_matching_value1, loss_matching_value2))
+                                                              loss_adv_local_value1, loss_D_value_s_1, loss_D_value_t_1))
 
         if i_iter >= args.num_steps_stop - 1:
             print('save model ...')
