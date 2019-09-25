@@ -15,9 +15,7 @@ class KMEANS:
         self.count = 0
         self.device = device
 
-    def fit(self, x):
-        init_row = torch.randint(0, x.shape[0], (self.n_clusters,)).to(self.device)
-        init_points = x[init_row]
+    def fit(self, x, init_points):
         self.centers = init_points
         self.dists = torch.zeros(x.shape[0], self.n_clusters).to(self.device)
         while True:

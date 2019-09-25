@@ -111,8 +111,16 @@ def get_crop_size(pred, nbb_list, scale, cuda_device):
         if clus_num == 0:
             crop_size_list.append(tmp)
             continue
-        estimator = kmeans.KMEANS(n_clusters=clus_num, device=cuda_device)
-        estimator.fit(data.reshape(h*w, c+2).to(cuda_device))
+        
+        estimator = kmeans.KMEANS(n_clusters=clus_num, max_iter = 100, device=cuda_device)
+        
+        init_points = torch.zeros(len(nbb_list[n]), c+2)
+        for k in range(len(nbb_list[n])):
+            pt = nbb_list[n][k]
+            i, j = int(pt[0]*scale[0]), int(pt[1]*scale[1])
+            init_points[k, :] = data[i, j, :]
+        
+        estimator.fit(data.reshape(h*w, c+2).to(cuda_device), init_points)
         kmeans_labels = estimator.labels.reshape(h, w)
         for pt in nbb_list[n]:
             i, j = int(pt[0]*scale[0]), int(pt[1]*scale[1])
