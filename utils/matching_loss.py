@@ -1,7 +1,5 @@
 import torch
 import torch.nn.functional as F
-from sklearn.cluster import KMeans
-import numpy as np
 from utils import kmeans
 
 
