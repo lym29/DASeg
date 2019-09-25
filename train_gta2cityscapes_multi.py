@@ -410,15 +410,19 @@ def main():
             nbb_list_s, nbb_list_t = matching_loss.find_NBB(S2T_nnf, T2S_nnf, labels.unsqueeze(0), prob_p)
             cropsize_list_s = matching_loss.get_crop_size(pred1, nbb_list_s, scale_s, device)
             cropsize_list_t = matching_loss.get_crop_size(pred_target1, nbb_list_t, scale_t, device)
+            count = 0
             for n in range(len(nbb_list_t)):
                 for k in range(len(nbb_list_t[n])):
                     ti, tj = nbb_list_t[n][k]
                     cropped_targ1 = matching_loss.crop_img(pred_target1, scale_t, torch.Tensor([ti, tj]), cropsize_list_t[n][k])
                     D_out_t = model_D1(F.softmax(cropped_targ1))
                     loss = bce_loss(D_out_t, torch.FloatTensor(D_out_t.data.size()).fill_(source_label).to(device))
-                    loss_adv_local_value1 += loss.item() / args.iter_size
+                    loss_adv_local_value1 += loss.item()
                     loss = args.lambda_adv_local1 * loss / args.iter_size
                     loss.backward(retain_graph=True)
+                    count += 1
+            if count > 0:
+                loss_adv_local_value1 /= count * args.iter_size
 
 
 
@@ -431,7 +435,7 @@ def main():
             for param in model_D2.parameters():
                 param.requires_grad = True
                 
-            
+            count = 0
             for n in range(len(nbb_list_s)):
                 for k in range(len(nbb_list_s[n])):
                     si, sj = nbb_list_s[n][k]
@@ -442,7 +446,11 @@ def main():
                     loss_Ds /= args.iter_size / 2
                     loss_Ds.backward()
                     loss_D_value_s_1 += loss_Ds.item()
+                    count += 1
+            if count > 0:
+                loss_D_value_s_1 /= count
 
+            count = 0
             for n in range(len(nbb_list_t)):
                 for k in range(len(nbb_list_t[n])):
                     ti, tj = nbb_list_t[n][k]
@@ -453,6 +461,9 @@ def main():
                     loss_Dt /= args.iter_size / 2
                     loss_Dt.backward()
                     loss_D_value_t_1 += loss_Dt.item()
+                    count += 1
+            if count > 0:
+                loss_D_value_t_1 /= count
 
             # train with source
             pred1 = pred1.detach()
