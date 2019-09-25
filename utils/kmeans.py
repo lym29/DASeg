@@ -23,7 +23,7 @@ class KMEANS:
             self.update_center(x)
             if self.verbose:
                 print(self.variation, torch.argmin(self.dists, (0)))
-            if torch.abs(self.variation) < 1e-3 and self.max_iter is None:
+            if torch.abs(self.variation) < 1e-3:
                 break
             elif self.max_iter is not None and self.count == self.max_iter:
                 break
@@ -39,7 +39,7 @@ class KMEANS:
         self.labels = torch.argmin(dists, dim=1)
         
         if self.started:
-            self.variation = torch.sum(self.dists - dists)
+            self.variation = torch.norm(self.dists - dists)
         self.started = True
 
     def update_center(self, x):
