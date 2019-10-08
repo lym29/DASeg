@@ -142,5 +142,3 @@ def crop_img(pred, scale, anchor, crop_size):
     p_min[p_min < 0] = 0
     p_max[p_max >= img_size] = img_size[p_max >= img_size]
     return pred[:, :, p_min[0]:p_max[0], p_min[1]:p_max[1]]
-
-
