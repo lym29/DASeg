@@ -219,8 +219,8 @@ def main():
     model_D1 = FCDiscriminator(num_classes=args.num_classes).to(device)
     model_D2 = FCDiscriminator(num_classes=args.num_classes).to(device)
     
-    #model_D1.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi_005_0025/GTA5_11700_D1.pth'))
-    #model_D2.load_state_dict(torch.load('./snapshots/GTA2Cityscapes_multi_005_0025/GTA5_11700_D2.pth'))
+#     model_D1.load_state_dict(torch.load('./snapshots/local_00002/GTA5_21000_D1.pth'))
+#     model_D2.load_state_dict(torch.load('./snapshots/local_00002/GTA5_21000_D2.pth'))
     
 
     model_D1.train()
@@ -284,7 +284,7 @@ def main():
 
         writer = SummaryWriter(args.log_dir)
 
-    for i_iter in range(0, args.num_steps):
+    for i_iter in range(21000, args.num_steps):
 
         loss_seg_value1 = 0
         loss_adv_target_value1 = 0
