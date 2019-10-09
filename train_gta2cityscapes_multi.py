@@ -279,7 +279,7 @@ def main():
 
         writer = SummaryWriter(args.log_dir)
 
-    for i_iter in range(21000, args.num_steps):
+    for i_iter in range(0, args.num_steps):
 
         loss_seg_value = 0
         loss_seg_local_value = 0
@@ -335,8 +335,6 @@ def main():
             loss_adv_target = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(source_label).to(device))
 
             loss = loss_seg + args.lambda_adv_target1 * loss_adv_target
-            loss /= args.iter_size
-            loss.backward(retain_graph=True)
 
             loss_adv_target_value += loss_adv_target.item() / args.iter_size
 
@@ -378,9 +376,10 @@ def main():
             _, _, h, w = pred_target.size()
             _, _, fh, fw = target_feature.size()
             scale_t = torch.Tensor([h, w]) // torch.Tensor([fh, fw])
-            nbb_list_s, nbb_list_t = matching_loss.find_NBB(S2T_nnf, T2S_nnf, labels.unsqueeze(0), prob_p)
+            nbb_list_s, nbb_list_t = matching_loss.find_NBB(S2T_nnf, T2S_nnf, labels.unsqueeze(0), F.normalize(pred_target))
             cropsize_list_s = matching_loss.get_crop_size(pred, nbb_list_s, scale_s, device)
             cropsize_list_t = matching_loss.get_crop_size(pred_target, nbb_list_t, scale_t, device)
+            print(len(nbb_list_t[0]))
 
             for n in range(len(nbb_list_t)):
                 pts_num = len(nbb_list_t[n])
@@ -388,7 +387,7 @@ def main():
                     ti, tj = nbb_list_t[n][k]
                     si, sj = nbb_list_s[n][k]
                     cropped_targ = matching_loss.crop_img(pred_target, scale_t, torch.Tensor([ti, tj]), cropsize_list_t[n][k])
-                    cropped_source = matching_loss.crop_img(pred, scale_t, torch.Tensor([ti, tj]), cropsize_list_t[n][k])
+                    cropped_source = matching_loss.crop_img(pred, scale_s, torch.Tensor([si, sj]), cropsize_list_s[n][k])
                     cropped_label = matching_loss.crop_img(labels.unsqueeze(1), scale_s, torch.Tensor([si, sj]), cropsize_list_s[n][k])
 
                     loss_seg_local = seg_loss(cropped_source, cropped_label.squeeze(1))
@@ -399,8 +398,10 @@ def main():
                     loss_adv_local_value += loss_adv_local.item() / pts_num
 
                     loss_local = args.lambda_seg_local * loss_seg_local + args.lambda_adv_local * loss_adv_local
-                    loss_local /= args.iter_size * pts_num
-                    loss_local.backward(retain_graph=True)
+                    loss += loss_local / pts_num
+
+            loss /= args.iter_size
+            loss.backward()
 
 
             # train D

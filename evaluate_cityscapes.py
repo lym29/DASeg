@@ -31,7 +31,7 @@ RESTORE_FROM = 'http://vllab.ucmerced.edu/ytsai/CVPR18/GTA2Cityscapes_multi-ed35
 RESTORE_FROM_VGG = 'http://vllab.ucmerced.edu/ytsai/CVPR18/GTA2Cityscapes_vgg-ac4ac9f6.pth'
 RESTORE_FROM_ORC = 'http://vllab1.ucmerced.edu/~whung/adaptSeg/cityscapes_oracle-b7b9934.pth'
 SET = 'val'
-INPUT_SIZE = '512,256'
+INPUT_SIZE = '1024,512'
 
 MODEL = 'DeeplabMulti'
 

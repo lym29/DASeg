@@ -40,7 +40,7 @@ def compute_mIoU(gt_dir, pred_dir, devkit_dir=''):
     pred_imgs = open(image_path_list, 'r').read().splitlines()
     pred_imgs = [join(pred_dir, x.split('/')[-1]) for x in pred_imgs]
 
-    input_size = (512, 256)
+    input_size = (1024, 512)
 
     for ind in range(len(gt_imgs)):
         pred = Image.open(pred_imgs[ind])
