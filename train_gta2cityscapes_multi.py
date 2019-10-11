@@ -57,7 +57,7 @@ LOG_DIR = './log'
 LEARNING_RATE_D = 1e-4
 LAMBDA_SEG = 0.1
 LAMBDA_ADV_TARGET1 = 0.0002
-LAMBDA_ADV_TARGET2 = 0.001
+LAMBDA_ADV_TARGET = 0.001
 LAMBDA_ADV_LOCAL = 0.0002
 LAMBDA_SEG_LOCAL = 0.1
 LAMBDA_MATCH_TARGET1 = 0.0002
@@ -108,7 +108,7 @@ def get_arguments():
                         help="lambda_seg.")
     parser.add_argument("--lambda-adv-target1", type=float, default=LAMBDA_ADV_TARGET1,
                         help="lambda_adv for adversarial training.")
-    parser.add_argument("--lambda-adv-target2", type=float, default=LAMBDA_ADV_TARGET2,
+    parser.add_argument("--lambda-adv-target", type=float, default=LAMBDA_ADV_TARGET,
                         help="lambda_adv for adversarial training.")
     parser.add_argument("--lambda-match-target1", type=float, default=LAMBDA_MATCH_TARGET1,
                         help="lambda_match for patch match.")
@@ -220,12 +220,16 @@ def main():
 
     # init D
     model_D = FCDiscriminator(num_classes=args.num_classes).to(device)
+    model_D_local = FCDiscriminator(num_classes=args.num_classes).to(device)
     
 #     model_D1.load_state_dict(torch.load('./snapshots/local_00002/GTA5_21000_D1.pth'))
 #     model_D2.load_state_dict(torch.load('./snapshots/local_00002/GTA5_21000_D2.pth'))
 
     model_D.train()
     model_D.to(device)
+    
+    model_D_local.train()
+    model_D_local.to(device)
 
     if not os.path.exists(args.snapshot_dir):
         os.makedirs(args.snapshot_dir)
@@ -261,6 +265,9 @@ def main():
 
     optimizer_D = optim.Adam(model_D.parameters(), lr=args.learning_rate_D, betas=(0.9, 0.99))
     optimizer_D.zero_grad()
+    
+    optimizer_D_local = optim.Adam(model_D_local.parameters(), lr=args.learning_rate_D, betas=(0.9, 0.99))
+    optimizer_D_local.zero_grad()
 
     bce_loss = torch.nn.BCEWithLogitsLoss()
     seg_loss = torch.nn.CrossEntropyLoss(ignore_index=255)
@@ -293,13 +300,23 @@ def main():
 
         optimizer_D.zero_grad()
         adjust_learning_rate_D(optimizer_D, i_iter)
+        
+        optimizer_D_local.zero_grad()
+        adjust_learning_rate_D(optimizer_D_local, i_iter)
 
         for sub_i in range(args.iter_size):
+            
+            loss_seg_local_value = 0
+            loss_adv_local_value = 0
+            loss_D_local_value = 0
 
             # train G
 
             # don't accumulate grads in D
             for param in model_D.parameters():
+                param.requires_grad = False
+                
+            for param in model_D_local.parameters():
                 param.requires_grad = False
 
             # train with source
@@ -333,10 +350,11 @@ def main():
             D_out = model_D(F.softmax(pred_target))
 
             loss_adv_target = bce_loss(D_out, torch.FloatTensor(D_out.data.size()).fill_(source_label).to(device))
-
-            loss = loss_seg + args.lambda_adv_target1 * loss_adv_target
-
             loss_adv_target_value += loss_adv_target.item() / args.iter_size
+            
+            loss = loss_seg + args.lambda_adv_target * loss_adv_target
+
+            
 
             # build guidance seg feature map
 #             S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
@@ -365,8 +383,8 @@ def main():
 #             loss /= args.iter_size
 #             loss.backward()
 
-            S2T_nnf = bds_voting.PatchMatch(source_feature, target_feature).forward()
-            T2S_nnf = bds_voting.PatchMatch(target_feature, source_feature).forward()
+            S2T_nnf, S2T_nnd = bds_voting.PatchMatch(source_feature, target_feature).forward()
+            T2S_nnf, _ = bds_voting.PatchMatch(target_feature, source_feature).forward()
 
             prob_p = bds_voting.build_prob_map(labels.unsqueeze(0), args.num_classes)
             
@@ -379,25 +397,20 @@ def main():
             nbb_list_s, nbb_list_t = matching_loss.find_NBB(S2T_nnf, T2S_nnf, labels.unsqueeze(0), F.normalize(pred_target))
             cropsize_list_s = matching_loss.get_crop_size(pred, nbb_list_s, scale_s, device)
             cropsize_list_t = matching_loss.get_crop_size(pred_target, nbb_list_t, scale_t, device)
-            print(len(nbb_list_t[0]))
 
             for n in range(len(nbb_list_t)):
                 pts_num = len(nbb_list_t[n])
+                print(pts_num)
                 for k in range(len(nbb_list_t[n])):
                     ti, tj = nbb_list_t[n][k]
                     si, sj = nbb_list_s[n][k]
                     cropped_targ = matching_loss.crop_img(pred_target, scale_t, torch.Tensor([ti, tj]), cropsize_list_t[n][k])
-                    cropped_source = matching_loss.crop_img(pred, scale_s, torch.Tensor([si, sj]), cropsize_list_s[n][k])
-                    cropped_label = matching_loss.crop_img(labels.unsqueeze(1), scale_s, torch.Tensor([si, sj]), cropsize_list_s[n][k])
 
-                    loss_seg_local = seg_loss(cropped_source, cropped_label.squeeze(1))
-                    loss_seg_local_value += loss_seg_local.item() / pts_num
-
-                    D_out_t = model_D(F.softmax(cropped_targ))
+                    D_out_t = model_D_local(F.softmax(cropped_targ))
                     loss_adv_local = bce_loss(D_out_t, torch.FloatTensor(D_out_t.data.size()).fill_(source_label).to(device))
                     loss_adv_local_value += loss_adv_local.item() / pts_num
 
-                    loss_local = args.lambda_seg_local * loss_seg_local + args.lambda_adv_local * loss_adv_local
+                    loss_local = args.lambda_adv_local * loss_adv_local
                     loss += loss_local / pts_num
 
             loss /= args.iter_size
@@ -408,6 +421,8 @@ def main():
 
             # bring back requires_grad
             for param in model_D.parameters():
+                param.requires_grad = True
+            for param in model_D_local.parameters():
                 param.requires_grad = True
 
             for n in range(len(nbb_list_t)):
@@ -420,8 +435,8 @@ def main():
                     cropped_source = matching_loss.crop_img(pred, scale_s, torch.Tensor([si, sj]),
                                                             cropsize_list_s[n][k])
 
-                    D_out_t = model_D(F.softmax(cropped_targ.detach()))
-                    D_out_s = model_D(F.softmax(cropped_source.detach()))
+                    D_out_t = model_D_local(F.softmax(cropped_targ.detach()))
+                    D_out_s = model_D_local(F.softmax(cropped_source.detach()))
 
                     loss_Dt = bce_loss(D_out_t, torch.FloatTensor(D_out_t.data.size()).fill_(target_label).to(device))
                     loss_Ds = bce_loss(D_out_s, torch.FloatTensor(D_out_s.data.size()).fill_(source_label).to(device))
@@ -448,9 +463,10 @@ def main():
             loss_D.backward()
 
             loss_D_value += loss_D.item()
-
+        
         optimizer.step()
         optimizer_D.step()
+        optimizer_D_local.step()
 
         if args.tensorboard:
             scalar_info = {
@@ -468,10 +484,11 @@ def main():
 
         print('exp = {}'.format(args.snapshot_dir))
         print(
-        'iter = {0:8d}/{1:8d}, loss_seg = {2:.3f} loss_adv = {4:.3f}, loss_D = {6:.3f} '
-        'loss_seg_local = {2:.3f} loss_adv_local = {4:.3f}, loss_D_local = {6:.3f}'
+        'iter = {0:8d}/{1:8d}, loss_seg = {2:.3f} loss_adv = {3:.3f}, loss_D = {4:.3f} '
+        'loss_seg_local = {5:.3f} loss_adv_local = {6:.3f}, loss_D_local = {7:.3f}'
             .format(i_iter, args.num_steps, loss_seg_value, loss_adv_target_value, loss_D_value, loss_seg_local_value, loss_adv_local_value, loss_D_local_value)
         )
+        
 
         if i_iter >= args.num_steps_stop - 1:
             print('save model ...')

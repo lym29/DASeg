@@ -101,10 +101,11 @@ def find_NBB(nnf_st, nnf_ts, label, prob, ignore_label = 255):
 def get_crop_size(pred, nbb_list, scale, cuda_device):
     crop_size_list = []
     b_size, c, h, w = pred.size()
+    c=0
     for n in range(b_size):
         tmp = []
         data = torch.zeros(h, w, c+2)
-        data[:, :, :c] = pred[n, :, :, :].detach().permute(1, 2, 0)
+        #data[:, :, :c] = pred[n, :, :, :].detach().permute(1, 2, 0)
         data[:, :, c] = torch.arange(h).repeat(w, 1).reshape(h, w)  # pos i
         data[:, :, c+1] = torch.arange(w).reshape(1, w).repeat(h, 1) # pos j
         
@@ -113,24 +114,25 @@ def get_crop_size(pred, nbb_list, scale, cuda_device):
             crop_size_list.append(tmp)
             continue
         
-        # estimator = kmeans.KMEANS(n_clusters=clus_num, max_iter=10, device=cuda_device)
-        #
-        # init_points = torch.zeros(len(nbb_list[n]), c+2).to(cuda_device)
-        # for k in range(len(nbb_list[n])):
-        #     pt = nbb_list[n][k]
-        #     i, j = int(pt[0]*scale[0]), int(pt[1]*scale[1])
-        #     init_points[k, :] = data[i, j, :]
-        #
-        # estimator.fit(data.reshape(h*w, c+2).to(cuda_device), init_points)
-        # kmeans_labels = estimator.labels.reshape(h, w)
-        # for pt in nbb_list[n]:
-        #     i, j = int(pt[0]*scale[0]), int(pt[1]*scale[1])
-        #     pt_class = kmeans_labels[i, j]
-        #     far_dist = data[:,:,c:].norm(dim=2)
-        #     far_dist[kmeans_labels != pt_class] = 0
-        #     far_pos = torch.argmax(far_dist)
-        #     crop_size = [8 + abs(far_pos // w - i), 8 + abs(far_pos % w - j)]
-        #     tmp.append(crop_size)
+        estimator = kmeans.KMEANS(n_clusters=clus_num, max_iter=10, device=cuda_device)
+        
+        init_points = torch.zeros(len(nbb_list[n]), c+2).to(cuda_device)
+        for k in range(len(nbb_list[n])):
+            pt = nbb_list[n][k]
+            i, j = int(pt[0]*scale[0]), int(pt[1]*scale[1])
+            init_points[k, :] = data[i, j, :]
+        
+        estimator.fit(data.reshape(h*w, c+2).to(cuda_device), init_points)
+        kmeans_labels = estimator.labels.reshape(h, w)
+#         for pt in nbb_list[n]:
+#             i, j = int(pt[0]*scale[0]), int(pt[1]*scale[1])
+#             pt_class = kmeans_labels[i, j]
+#             far_dist = data[:,:,c:].norm(dim=2)
+#             far_dist[kmeans_labels != pt_class] = 0
+#             far_pos = torch.argmax(far_dist)
+#             crop_i = max(abs(far_pos // w - i)//3,32)
+#             crop_j = max(abs(far_pos % w - j)//3, 32)
+#             tmp.append([crop_i, crop_j])
 
         for pt in nbb_list[n]:
             tmp.append([32, 32])
