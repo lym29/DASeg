@@ -21,12 +21,45 @@ def label_mapping(input, mapping):
     return np.array(output, dtype=np.int64)
 
 
+def mIoUforTest(gt_dir, pred_dir, devkit_dir='dataset/cityscapes_list', input_size=(1024, 512)):
+    with open(join(devkit_dir, 'info.json'), 'r') as fp:
+        info = json.load(fp)
+    num_classes = np.int(info['classes'])
+    name_classes = np.array(info['label'], dtype=np.str)
+    mapping = np.array(info['label2train'], dtype=np.int)
+    hist = np.zeros((num_classes, num_classes))
+
+    image_path_list = join(devkit_dir, 'val.txt')
+    label_path_list = join(devkit_dir, 'label.txt')
+    gt_imgs = open(label_path_list, 'r').read().splitlines()
+    gt_imgs = [join(gt_dir, x) for x in gt_imgs]
+    pred_imgs = open(image_path_list, 'r').read().splitlines()
+    pred_imgs = [join(pred_dir, x.split('/')[-1]) for x in pred_imgs]
+
+    for ind in range(len(gt_imgs)):
+        if ind > 10:
+            break
+        pred = Image.open(pred_imgs[ind])
+        label = Image.open(gt_imgs[ind])
+        pred = np.array(pred.resize(input_size))
+        label = np.array(label.resize(input_size))
+        label = label_mapping(label, mapping)
+        if len(label.flatten()) != len(pred.flatten()):
+            print('Skipping: len(gt) = {:d}, len(pred) = {:d}, {:s}, {:s}'.format(len(label.flatten()),
+                                                                                  len(pred.flatten()), gt_imgs[ind],
+                                                                                  pred_imgs[ind]))
+            continue
+        hist += fast_hist(label.flatten(), pred.flatten(), num_classes)
+
+    mIoUs = per_class_iu(hist)
+    return round(np.nanmean(mIoUs) * 100, 2).item()
+
 def compute_mIoU(gt_dir, pred_dir, devkit_dir=''):
     """
     Compute IoU given the predicted colorized images and 
     """
     with open(join(devkit_dir, 'info.json'), 'r') as fp:
-      info = json.load(fp)
+        info = json.load(fp)
     num_classes = np.int(info['classes'])
     print('Num classes', num_classes)
     name_classes = np.array(info['label'], dtype=np.str)
@@ -63,7 +96,7 @@ def compute_mIoU(gt_dir, pred_dir, devkit_dir=''):
 
 
 def main(args):
-   compute_mIoU(args.gt_dir, args.pred_dir, args.devkit_dir)
+    compute_mIoU(args.gt_dir, args.pred_dir, args.devkit_dir)
 
 
 if __name__ == "__main__":

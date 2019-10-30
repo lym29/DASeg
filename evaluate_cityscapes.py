@@ -20,9 +20,9 @@ from PIL import Image
 import torch.nn as nn
 IMG_MEAN = np.array((104.00698793,116.66876762,122.67891434), dtype=np.float32)
 
-DATA_DIRECTORY = '/disk2/yumeng_data/Cityscapes/leftImg8bit_trainvaltest/'
+DATA_DIRECTORY = '~/dataset/Cityscapes/leftImg8bit_trainvaltest/'
 DATA_LIST_PATH = './dataset/cityscapes_list/val.txt'
-SAVE_PATH = '/disk2/yumeng_data/Cityscapes/result_patchmatch/cityscapes'
+SAVE_PATH = './result/tmp/'
 
 IGNORE_LABEL = 255
 NUM_CLASSES = 19
@@ -79,6 +79,36 @@ def get_arguments():
     return parser.parse_args()
 
 
+def test_model(model, device, val_dir, val_list, save_dir, input_size=(1024, 512)):
+    model.eval()
+
+    testloader = data.DataLoader(
+        cityscapesDataSet(val_dir, val_list, crop_size=input_size, mean=IMG_MEAN, scale=False, mirror=False,
+                          set='val'),
+        batch_size=1, shuffle=False, pin_memory=True)
+
+    interp = nn.Upsample(size=(input_size[1], input_size[0]), mode='bilinear', align_corners=True)
+
+    for index, batch in enumerate(testloader):
+        if index > 10:
+            break
+        image, _, name = batch
+        image = image.to(device)
+
+        output1, output2,_,_ = model(image)
+        output = interp(output2).cpu().data[0].numpy()
+
+        output = output.transpose(1, 2, 0)
+        output = np.asarray(np.argmax(output, axis=2), dtype=np.uint8)
+
+        output_col = colorize_mask(output)
+        output = Image.fromarray(output)
+
+        name = name[0].split('/')[-1]
+        output.save('%s/%s' % (save_dir, name))
+        output_col.save('%s/%s_color.png' % (save_dir, name.split('.')[0]))
+
+
 def main():
     """Create the model and start the evaluation process."""
     args = get_arguments()
@@ -123,7 +153,7 @@ def main():
         image = image.to(device)
 
         if args.model == 'DeeplabMulti':
-            output1, output2 = model(image)
+            output1, output2,_,_ = model(image)
             output = interp(output2).cpu().data[0].numpy()
         elif args.model == 'DeeplabVGG' or args.model == 'Oracle':
             output = model(image)

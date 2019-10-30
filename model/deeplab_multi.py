@@ -175,12 +175,14 @@ class ResNetMulti(nn.Module):
         x = self.layer2(x)
 
         x = self.layer3(x)
+        #f1 = x 
         x1 = self.layer5(x)
 
         x2 = self.layer4(x)
+        f2 = x2
         x2 = self.layer6(x2)
 
-        return x1, x2
+        return x1, x2, None, f2
 
     def get_1x_lr_params_NOscale(self):
         """
@@ -222,6 +224,9 @@ class ResNetMulti(nn.Module):
     def optim_parameters(self, args):
         return [{'params': self.get_1x_lr_params_NOscale(), 'lr': args.learning_rate},
                 {'params': self.get_10x_lr_params(), 'lr': 10 * args.learning_rate}]
+    
+    def classifier(self, f):
+        return self.layer6(f)
 
 
 def DeeplabMulti(num_classes=21):
