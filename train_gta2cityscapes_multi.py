@@ -182,7 +182,7 @@ def get_feature(vgg19, img_tensor, feature_id):
 
 def normalize(feature):
     f_norm = torch.norm(feature, dim=1, keepdim=True).detach()
-    f_norm[torch.abs(f_norm) < 1e-3] = 1
+    f_norm[torch.abs(f_norm) < 1e-6] = 1
     return feature / f_norm
 
 def get_correspondance(f_src, f_tar, pred, pred_target, prob_threshold = 0.95, sampling_num = 100):
@@ -364,11 +364,12 @@ def main():
             images = images.to(device)
             labels = labels.long().to(device)
 
-            pred_s1, pred_s2, _, f_s2 = model(images)
-            f_s2 = normalize(f_s2)
+            pred_s1, pred_s2, _, _ = model(images)
+            #f_s2 = normalize(f_s2)
             pred_s1, pred_s2 = interp(pred_s1), interp(pred_s2)
 
             loss_seg = args.lambda_seg * seg_loss(pred_s1, labels) + seg_loss(pred_s2, labels)
+            del labels
 
             # proper normalization
             loss_seg_value += loss_seg.item() / args.iter_size
@@ -378,8 +379,8 @@ def main():
             images, _, _ = batch
             images = images.to(device)
 
-            pred_t1, pred_t2, _, f_t2 = model(images)
-            f_t2 = normalize(f_t2)
+            pred_t1, pred_t2, _, _ = model(images)
+            #f_t2 = normalize(f_t2)
             pred_t1, pred_t2 = interp_target(pred_t1), interp_target(pred_t2)
             del images
 
