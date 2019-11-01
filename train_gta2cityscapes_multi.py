@@ -393,6 +393,7 @@ def main():
             
             loss = loss_seg + args.lambda_adv_target1 * loss_adv_target1 + args.lambda_adv_target * loss_adv_target2
 
+            del D_out_1, D_out_2
 
 #             #< Local patch part>#
 #             corres_id2 = get_correspondance(f_s2, f_t2, pred_s2, pred_t2)
