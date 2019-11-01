@@ -393,15 +393,15 @@ def main():
             loss = loss_seg + args.lambda_adv_target1 * loss_adv_target1 + args.lambda_adv_target * loss_adv_target2
 
 
-            #< Local patch part>#
-            corres_id2 = get_correspondance(f_s2, f_t2, pred_s2, pred_t2)
+#             #< Local patch part>#
+#             corres_id2 = get_correspondance(f_s2, f_t2, pred_s2, pred_t2)
                 
-            #loss_local1 = local_feature_loss(corres_id1, f_s1, f_t1, model, seg_loss)
-            loss_local2 = local_feature_loss(corres_id2, labels, f_t2, model, seg_loss)
-            loss_local = args.lambda_match_target2 * loss_local2 #+args.lambda_match_target1 * loss_local1
-            loss += loss_local
-            if corres_id2.nelement() > 0:
-                loss_local_match_value += loss_local.item()/ args.iter_size
+#             #loss_local1 = local_feature_loss(corres_id1, f_s1, f_t1, model, seg_loss)
+#             loss_local2 = local_feature_loss(corres_id2, labels, f_t2, model, seg_loss)
+#             loss_local = args.lambda_match_target2 * loss_local2 #+args.lambda_match_target1 * loss_local1
+#             loss += loss_local
+#             if corres_id2.nelement() > 0:
+#                 loss_local_match_value += loss_local.item()/ args.iter_size
             
             loss /= args.iter_size
             loss.backward()
